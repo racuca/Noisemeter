@@ -13,10 +13,12 @@ import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.PlayArrow
@@ -66,7 +68,16 @@ data class AppStrings(
     val reset: String,
     val selectLanguage: String,
     val close: String,
-    val continuous: String
+    val continuous: String,
+    val noiseStandards: String,
+    val areaSelection: String,
+    val day: String,
+    val night: String,
+    val limit: String,
+    val status: String,
+    val statusSafe: String,
+    val statusWarning: String,
+    val statusExceeded: String
 )
 
 val EnStrings = AppStrings(
@@ -88,7 +99,16 @@ val EnStrings = AppStrings(
     reset = "Reset",
     selectLanguage = "Select Language",
     close = "Close",
-    continuous = "Cont."
+    continuous = "Cont.",
+    noiseStandards = "Noise Standards (South Korea)",
+    areaSelection = "Select Area Type",
+    day = "Day (06:00-22:00)",
+    night = "Night (22:00-06:00)",
+    limit = "Limit",
+    status = "Status",
+    statusSafe = "Safe",
+    statusWarning = "Warning",
+    statusExceeded = "Exceeded"
 )
 
 val KoStrings = AppStrings(
@@ -110,7 +130,32 @@ val KoStrings = AppStrings(
     reset = "초기화",
     selectLanguage = "언어 선택",
     close = "닫기",
-    continuous = "연속"
+    continuous = "연속",
+    noiseStandards = "국내 소음 환경 기준",
+    areaSelection = "지역 유형 선택",
+    day = "낮 (06:00~22:00)",
+    night = "밤 (22:00~06:00)",
+    limit = "기준치",
+    status = "상태",
+    statusSafe = "양호",
+    statusWarning = "주의",
+    statusExceeded = "기준 초과"
+)
+
+data class NoiseStandard(
+    val nameKo: String,
+    val nameEn: String,
+    val dayLimit: Int,
+    val nightLimit: Int
+)
+
+val noiseStandards = listOf(
+    NoiseStandard("주거지역 (전용)", "Residential (Exclusive)", 50, 40),
+    NoiseStandard("주거지역 (일반)", "Residential (General)", 55, 45),
+    NoiseStandard("상업지역", "Commercial", 65, 55),
+    NoiseStandard("공업지역", "Industrial", 70, 65),
+    NoiseStandard("교통소음 (도로변)", "Roadside", 65, 55),
+    NoiseStandard("항공기소음 (Lden)", "Aircraft (Lden)", 75, 75) // simplified
 )
 
 class MainActivity : ComponentActivity() {
@@ -204,6 +249,7 @@ fun NoiseMeterApp(adManager: InterstitialAdManager) {
             cumulativeMax = totalCumulativeMax,
             adManager = adManager,
             strings = strings,
+            language = currentLanguage,
             onReset = resetStats,
             onBack = { resultData = null }
         )
@@ -485,18 +531,23 @@ fun ResultScreen(
     cumulativeMax: Double,
     adManager: InterstitialAdManager,
     strings: AppStrings,
+    language: Language,
     onReset: () -> Unit,
     onBack: () -> Unit
 ) {
     LaunchedEffect(Unit) { adManager.show {} }
+    
+    var selectedAreaIndex by remember { mutableStateOf(0) }
+    val selectedStandard = noiseStandards[selectedAreaIndex]
+    
+    val scrollState = rememberScrollState()
 
     Column(
-        modifier = Modifier.fillMaxSize().padding(24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
+        modifier = Modifier.fillMaxSize().padding(24.dp).verticalScroll(scrollState),
+        horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Text(strings.complete, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-        Spacer(modifier = Modifier.height(32.dp))
+        Spacer(modifier = Modifier.height(24.dp))
 
         ElevatedCard(
             modifier = Modifier.fillMaxWidth(),
@@ -511,7 +562,42 @@ fun ResultScreen(
             }
         }
 
-        Spacer(modifier = Modifier.height(48.dp))
+        Spacer(modifier = Modifier.height(24.dp))
+        
+        // Noise Standard Comparison Section
+        Text(strings.noiseStandards, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+        
+        Spacer(modifier = Modifier.height(8.dp))
+        
+        ScrollableTabRow(
+            selectedTabIndex = selectedAreaIndex,
+            edgePadding = 0.dp,
+            containerColor = Color.Transparent,
+            divider = {}
+        ) {
+            noiseStandards.forEachIndexed { index, standard ->
+                Tab(
+                    selected = selectedAreaIndex == index,
+                    onClick = { selectedAreaIndex = index },
+                    text = { Text(if (language == Language.KO) standard.nameKo else standard.nameEn) }
+                )
+            }
+        }
+        
+        Spacer(modifier = Modifier.height(16.dp))
+        
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                StandardComparisonRow(strings.day, selectedStandard.dayLimit, data.third, strings)
+                Spacer(modifier = Modifier.height(8.dp))
+                StandardComparisonRow(strings.night, selectedStandard.nightLimit, data.third, strings)
+            }
+        }
+
+        Spacer(modifier = Modifier.height(32.dp))
 
         Button(
             onClick = onBack,
@@ -523,6 +609,40 @@ fun ResultScreen(
         
         TextButton(onClick = onReset, modifier = Modifier.padding(top = 8.dp)) {
             Text(strings.clearData, color = Color.Gray)
+        }
+    }
+}
+
+@Composable
+fun StandardComparisonRow(label: String, limit: Int, currentAvg: Double, strings: AppStrings) {
+    val status = when {
+        currentAvg > limit -> strings.statusExceeded
+        currentAvg > limit - 5 -> strings.statusWarning
+        else -> strings.statusSafe
+    }
+    
+    val statusColor = when (status) {
+        strings.statusExceeded -> Color.Red
+        strings.statusWarning -> Color(0xFFFBBC04)
+        else -> Color(0xFF34A853)
+    }
+
+    Column {
+        Text(label, style = MaterialTheme.typography.labelMedium, color = Color.Gray)
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+            Text("${strings.limit}: $limit dB", fontWeight = FontWeight.Medium)
+            Surface(
+                color = statusColor.copy(alpha = 0.1f),
+                shape = RoundedCornerShape(4.dp)
+            ) {
+                Text(
+                    text = status,
+                    color = statusColor,
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Bold
+                )
+            }
         }
     }
 }

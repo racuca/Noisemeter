@@ -6,7 +6,7 @@ plugins {
 
 android {
     namespace = "com.mvpcoding.noisemeter"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.mvpcoding.noisemeter"
