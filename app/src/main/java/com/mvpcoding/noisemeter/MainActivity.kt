@@ -81,20 +81,21 @@ data class AppStrings(
     val statusExceeded: String,
     val history: String,
     val attempt: String,
-    val measured: String
+    val measured: String,
+    val conversionInfo: String
 )
 
 val EnStrings = AppStrings(
     title = "Noise Meter",
-    unit = "DECIBELS (dB)",
+    unit = "dB(A)",
     sessionMax = "Session Max",
-    sessionAvg = "Session Avg",
+    sessionAvg = "Session Avg (Leq)",
     globalMax = "Global Max",
     globalAvg = "Global Avg",
     setDuration = "Set Duration",
     complete = "Measurement Complete",
     resultMax = "Max Level",
-    resultAvg = "Avg Level",
+    resultAvg = "Avg Level (Leq)",
     allTimeMax = "All-time Max",
     allTimeAvg = "All-time Avg",
     tryAgain = "Try Again",
@@ -104,7 +105,7 @@ val EnStrings = AppStrings(
     selectLanguage = "Select Language",
     close = "Close",
     continuous = "Cont.",
-    noiseStandards = "Noise Standards (South Korea)",
+    noiseStandards = "Environmental Standards (KR)",
     areaSelection = "Select Area Type",
     day = "Day (06:00-22:00)",
     night = "Night (22:00-06:00)",
@@ -115,20 +116,21 @@ val EnStrings = AppStrings(
     statusExceeded = "Exceeded",
     history = "Measurement History",
     attempt = "Attempt",
-    measured = "Measured"
+    measured = "Measured",
+    conversionInfo = "* Leq is the energy-averaged decibel level."
 )
 
 val KoStrings = AppStrings(
     title = "소음 측정기",
-    unit = "데시벨 (dB)",
+    unit = "dB(A)",
     sessionMax = "세션 최대",
-    sessionAvg = "세션 평균",
+    sessionAvg = "세션 평균 (Leq)",
     globalMax = "전체 최대",
     globalAvg = "전체 평균",
     setDuration = "측정 시간 설정",
     complete = "측정 완료",
     resultMax = "최대 수치",
-    resultAvg = "평균 수치",
+    resultAvg = "평균 수치 (Leq)",
     allTimeMax = "누적 최대",
     allTimeAvg = "누적 평균",
     tryAgain = "다시 시도",
@@ -149,7 +151,8 @@ val KoStrings = AppStrings(
     statusExceeded = "기준 초과",
     history = "측정 이력",
     attempt = "회차",
-    measured = "측정치"
+    measured = "측정치",
+    conversionInfo = "* Leq는 소음 에너지의 평균값(dB)입니다."
 )
 
 data class NoiseStandard(
@@ -217,7 +220,7 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun NoiseMeterApp(adManager: InterstitialAdManager) {
     var resultData by remember { mutableStateOf<Triple<Double, Double, Double>?>(null) }
-    var currentLanguage by rememberSaveable { mutableStateOf(Language.EN) }
+    var currentLanguage by rememberSaveable { mutableStateOf(Language.KO) }
     var showSettings by remember { mutableStateOf(false) }
     
     val strings = if (currentLanguage == Language.KO) KoStrings else EnStrings
@@ -494,7 +497,7 @@ fun NoiseMeterScreen(
                                         currentDb = db
                                         if (db > maxDb) maxDb = db
                                         
-                                        // Energy average for Leq
+                                        // Energy average for Leq (Environmental standard)
                                         val intensity = 10.0.pow(db / 10.0)
                                         intensitySum += intensity
                                         count++
@@ -574,15 +577,15 @@ fun ResultScreen(
         Text(strings.complete, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
         Spacer(modifier = Modifier.height(24.dp))
 
-        // All-time Stats at the TOP
+        // All-time Stats
         ElevatedCard(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(24.dp),
             colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
         ) {
             Column(modifier = Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                ResultRow(strings.allTimeMax, "%.1f dB".format(cumulativeMax), MaterialTheme.colorScheme.onPrimaryContainer)
-                ResultRow(strings.allTimeAvg, "%.1f dB".format(cumulativeAvg), MaterialTheme.colorScheme.onPrimaryContainer)
+                ResultRow(strings.allTimeMax, "%.1f dB(A)".format(cumulativeMax), MaterialTheme.colorScheme.onPrimaryContainer)
+                ResultRow(strings.allTimeAvg, "%.1f dB(A)".format(cumulativeAvg), MaterialTheme.colorScheme.onPrimaryContainer)
             }
         }
 
@@ -594,14 +597,14 @@ fun ResultScreen(
             shape = RoundedCornerShape(24.dp)
         ) {
             Column(modifier = Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                ResultRow(strings.resultMax, "%.1f dB".format(data.second))
-                ResultRow(strings.resultAvg, "%.1f dB".format(data.third))
+                ResultRow(strings.resultMax, "%.1f dB(A)".format(data.second))
+                ResultRow(strings.resultAvg, "%.1f dB(A)".format(data.third))
             }
         }
 
         Spacer(modifier = Modifier.height(24.dp))
         
-        // Measurement History Section
+        // Measurement History
         if (history.isNotEmpty()) {
             Text(strings.history, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
             Spacer(modifier = Modifier.height(8.dp))
@@ -616,7 +619,7 @@ fun ResultScreen(
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
                             Text("${strings.attempt} ${history.size - index}", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
-                            Text("Max: %.1f / Avg: %.1f dB".format(record.max, record.avg), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+                            Text("Max: %.1f / Avg: %.1f dB(A)".format(record.max, record.avg), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
                         }
                         if (index < history.size - 1) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
                     }
@@ -626,7 +629,7 @@ fun ResultScreen(
 
         Spacer(modifier = Modifier.height(24.dp))
         
-        // Noise Standard Comparison Section
+        // Noise Standard Comparison
         Text(strings.noiseStandards, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
         
         Spacer(modifier = Modifier.height(8.dp))
@@ -654,8 +657,15 @@ fun ResultScreen(
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
                 StandardComparisonRow(strings.day, selectedStandard.dayLimit, data.third, strings, selectedStandard.unit, false)
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(12.dp))
                 StandardComparisonRow(strings.night, selectedStandard.nightLimit, data.third, strings, selectedStandard.unit, true)
+                
+                Spacer(modifier = Modifier.height(12.dp))
+                Text(
+                    text = strings.conversionInfo,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color.Gray
+                )
             }
         }
 
@@ -677,7 +687,8 @@ fun ResultScreen(
 
 @Composable
 fun StandardComparisonRow(label: String, limit: Int, currentAvg: Double, strings: AppStrings, unit: String, isNightPeriod: Boolean) {
-    // Apply penalty for Lden if it's night period (+10dB)
+    // Apply weighting for Lden (Aircraft noise)
+    // Night (22:00-06:00) gets +10dB, Evening (19:00-22:00) would get +5dB
     val convertedValue = if (unit == "Lden" && isNightPeriod) currentAvg + 10.0 else currentAvg
     
     val status = when {
@@ -697,7 +708,10 @@ fun StandardComparisonRow(label: String, limit: Int, currentAvg: Double, strings
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             Column {
                 Text("${strings.limit}: $limit $unit", style = MaterialTheme.typography.bodyMedium)
-                Text("${strings.measured}: %.1f $unit".format(convertedValue), fontWeight = FontWeight.Bold)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("${strings.measured}: %.1f".format(convertedValue), fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                    Text(" $unit", style = MaterialTheme.typography.labelSmall, color = Color.Gray, modifier = Modifier.padding(start = 2.dp))
+                }
             }
             Surface(
                 color = statusColor.copy(alpha = 0.1f),
@@ -706,7 +720,7 @@ fun StandardComparisonRow(label: String, limit: Int, currentAvg: Double, strings
                 Text(
                     text = status,
                     color = statusColor,
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
                     style = MaterialTheme.typography.labelSmall,
                     fontWeight = FontWeight.Bold
                 )
