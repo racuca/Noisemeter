@@ -43,6 +43,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.isActive
 import kotlin.math.log10
 import kotlin.math.sqrt
+import kotlin.math.pow
 import com.google.android.gms.ads.MobileAds
 
 lateinit var adManager: InterstitialAdManager
@@ -77,7 +78,10 @@ data class AppStrings(
     val status: String,
     val statusSafe: String,
     val statusWarning: String,
-    val statusExceeded: String
+    val statusExceeded: String,
+    val history: String,
+    val attempt: String,
+    val measured: String
 )
 
 val EnStrings = AppStrings(
@@ -108,7 +112,10 @@ val EnStrings = AppStrings(
     status = "Status",
     statusSafe = "Safe",
     statusWarning = "Warning",
-    statusExceeded = "Exceeded"
+    statusExceeded = "Exceeded",
+    history = "Measurement History",
+    attempt = "Attempt",
+    measured = "Measured"
 )
 
 val KoStrings = AppStrings(
@@ -139,23 +146,32 @@ val KoStrings = AppStrings(
     status = "상태",
     statusSafe = "양호",
     statusWarning = "주의",
-    statusExceeded = "기준 초과"
+    statusExceeded = "기준 초과",
+    history = "측정 이력",
+    attempt = "회차",
+    measured = "측정치"
 )
 
 data class NoiseStandard(
     val nameKo: String,
     val nameEn: String,
     val dayLimit: Int,
-    val nightLimit: Int
+    val nightLimit: Int,
+    val unit: String
 )
 
 val noiseStandards = listOf(
-    NoiseStandard("주거지역 (전용)", "Residential (Exclusive)", 50, 40),
-    NoiseStandard("주거지역 (일반)", "Residential (General)", 55, 45),
-    NoiseStandard("상업지역", "Commercial", 65, 55),
-    NoiseStandard("공업지역", "Industrial", 70, 65),
-    NoiseStandard("교통소음 (도로변)", "Roadside", 65, 55),
-    NoiseStandard("항공기소음 (Lden)", "Aircraft (Lden)", 75, 75) // simplified
+    NoiseStandard("주거지역 (전용)", "Residential (Exclusive)", 50, 40, "Leq"),
+    NoiseStandard("주거지역 (일반)", "Residential (General)", 55, 45, "Leq"),
+    NoiseStandard("상업지역", "Commercial", 65, 55, "Leq"),
+    NoiseStandard("공업지역", "Industrial", 70, 65, "Leq"),
+    NoiseStandard("교통소음 (도로변)", "Roadside", 65, 55, "Leq"),
+    NoiseStandard("항공기소음", "Aircraft", 75, 75, "Lden")
+)
+
+data class MeasurementRecord(
+    val max: Double,
+    val avg: Double
 )
 
 class MainActivity : ComponentActivity() {
@@ -206,17 +222,20 @@ fun NoiseMeterApp(adManager: InterstitialAdManager) {
     
     val strings = if (currentLanguage == Language.KO) KoStrings else EnStrings
 
-    var totalCumulativeSum by remember { mutableStateOf(0.0) }
+    var totalCumulativeIntensitySum by remember { mutableStateOf(0.0) }
     var totalCumulativeCount by remember { mutableStateOf(0) }
     var totalCumulativeMax by remember { mutableStateOf(0.0) }
     
-    val globalCumulativeAvg = if (totalCumulativeCount > 0) totalCumulativeSum / totalCumulativeCount else 0.0
+    val history = remember { mutableStateListOf<MeasurementRecord>() }
+    
+    val globalCumulativeAvg = if (totalCumulativeCount > 0) 10 * log10(totalCumulativeIntensitySum / totalCumulativeCount) else 0.0
 
     val resetStats = {
-        totalCumulativeSum = 0.0
+        totalCumulativeIntensitySum = 0.0
         totalCumulativeCount = 0
         totalCumulativeMax = 0.0
         resultData = null
+        history.clear()
     }
 
     if (showSettings) {
@@ -235,11 +254,12 @@ fun NoiseMeterApp(adManager: InterstitialAdManager) {
             onReset = resetStats,
             onSettingsClick = { showSettings = true },
             strings = strings,
-            onFinished = { current, max, avg, sessionSum, sessionCount ->
-                totalCumulativeSum += sessionSum
+            onFinished = { current, max, avg, intensitySum, sessionCount ->
+                totalCumulativeIntensitySum += intensitySum
                 totalCumulativeCount += sessionCount
                 if (max > totalCumulativeMax) totalCumulativeMax = max
                 resultData = Triple(current, max, avg)
+                history.add(0, MeasurementRecord(max, avg)) // Add to the beginning
             }
         )
     } else {
@@ -247,6 +267,7 @@ fun NoiseMeterApp(adManager: InterstitialAdManager) {
             data = resultData!!,
             cumulativeAvg = globalCumulativeAvg,
             cumulativeMax = totalCumulativeMax,
+            history = history,
             adManager = adManager,
             strings = strings,
             language = currentLanguage,
@@ -446,7 +467,7 @@ fun NoiseMeterScreen(
                             currentDb = 0.0
                             maxDb = 0.0
                             avgDb = 0.0
-                            var sum = 0.0
+                            var intensitySum = 0.0
                             var count = 0
                             val startTime = System.currentTimeMillis()
                             val durationMillis = if (selectedSeconds > 0) selectedSeconds * 1000L else Long.MAX_VALUE
@@ -472,9 +493,12 @@ fun NoiseMeterScreen(
 
                                         currentDb = db
                                         if (db > maxDb) maxDb = db
-                                        sum += db
+                                        
+                                        // Energy average for Leq
+                                        val intensity = 10.0.pow(db / 10.0)
+                                        intensitySum += intensity
                                         count++
-                                        avgDb = sum / count
+                                        avgDb = 10 * log10(intensitySum / count)
                                     }
                                     delay(100)
                                 }
@@ -483,7 +507,7 @@ fun NoiseMeterScreen(
                                 recorder.release()
                                 isMeasuring = false
                                 progress = 0f
-                                launch(Dispatchers.Main) { onFinished(currentDb, maxDb, avgDb, sum, count) }
+                                launch(Dispatchers.Main) { onFinished(currentDb, maxDb, avgDb, intensitySum, count) }
                             }
                         }
                     }
@@ -529,6 +553,7 @@ fun ResultScreen(
     data: Triple<Double, Double, Double>,
     cumulativeAvg: Double,
     cumulativeMax: Double,
+    history: List<MeasurementRecord>,
     adManager: InterstitialAdManager,
     strings: AppStrings,
     language: Language,
@@ -549,6 +574,21 @@ fun ResultScreen(
         Text(strings.complete, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
         Spacer(modifier = Modifier.height(24.dp))
 
+        // All-time Stats at the TOP
+        ElevatedCard(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(24.dp),
+            colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
+        ) {
+            Column(modifier = Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                ResultRow(strings.allTimeMax, "%.1f dB".format(cumulativeMax), MaterialTheme.colorScheme.onPrimaryContainer)
+                ResultRow(strings.allTimeAvg, "%.1f dB".format(cumulativeAvg), MaterialTheme.colorScheme.onPrimaryContainer)
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // Current Session Stats
         ElevatedCard(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(24.dp)
@@ -556,9 +596,31 @@ fun ResultScreen(
             Column(modifier = Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 ResultRow(strings.resultMax, "%.1f dB".format(data.second))
                 ResultRow(strings.resultAvg, "%.1f dB".format(data.third))
-                HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
-                ResultRow(strings.allTimeMax, "%.1f dB".format(cumulativeMax), MaterialTheme.colorScheme.tertiary)
-                ResultRow(strings.allTimeAvg, "%.1f dB".format(cumulativeAvg), MaterialTheme.colorScheme.primary)
+            }
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
+        
+        // Measurement History Section
+        if (history.isNotEmpty()) {
+            Text(strings.history, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            Spacer(modifier = Modifier.height(8.dp))
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = Color.White)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    history.forEachIndexed { index, record ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text("${strings.attempt} ${history.size - index}", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+                            Text("Max: %.1f / Avg: %.1f dB".format(record.max, record.avg), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+                        }
+                        if (index < history.size - 1) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+                    }
+                }
             }
         }
 
@@ -591,9 +653,9 @@ fun ResultScreen(
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
-                StandardComparisonRow(strings.day, selectedStandard.dayLimit, data.third, strings)
+                StandardComparisonRow(strings.day, selectedStandard.dayLimit, data.third, strings, selectedStandard.unit, false)
                 Spacer(modifier = Modifier.height(8.dp))
-                StandardComparisonRow(strings.night, selectedStandard.nightLimit, data.third, strings)
+                StandardComparisonRow(strings.night, selectedStandard.nightLimit, data.third, strings, selectedStandard.unit, true)
             }
         }
 
@@ -614,10 +676,13 @@ fun ResultScreen(
 }
 
 @Composable
-fun StandardComparisonRow(label: String, limit: Int, currentAvg: Double, strings: AppStrings) {
+fun StandardComparisonRow(label: String, limit: Int, currentAvg: Double, strings: AppStrings, unit: String, isNightPeriod: Boolean) {
+    // Apply penalty for Lden if it's night period (+10dB)
+    val convertedValue = if (unit == "Lden" && isNightPeriod) currentAvg + 10.0 else currentAvg
+    
     val status = when {
-        currentAvg > limit -> strings.statusExceeded
-        currentAvg > limit - 5 -> strings.statusWarning
+        convertedValue > limit -> strings.statusExceeded
+        convertedValue > limit - 5 -> strings.statusWarning
         else -> strings.statusSafe
     }
     
@@ -630,7 +695,10 @@ fun StandardComparisonRow(label: String, limit: Int, currentAvg: Double, strings
     Column {
         Text(label, style = MaterialTheme.typography.labelMedium, color = Color.Gray)
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-            Text("${strings.limit}: $limit dB", fontWeight = FontWeight.Medium)
+            Column {
+                Text("${strings.limit}: $limit $unit", style = MaterialTheme.typography.bodyMedium)
+                Text("${strings.measured}: %.1f $unit".format(convertedValue), fontWeight = FontWeight.Bold)
+            }
             Surface(
                 color = statusColor.copy(alpha = 0.1f),
                 shape = RoundedCornerShape(4.dp)
